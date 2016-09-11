@@ -56,7 +56,7 @@ printf("%20s ---Failed--- ---Banned---\n", '');
 printf("%20s    Cur   Tot    Cur   Tot\n", '');
 for my $j_name (sort keys %$table) {
 	my $j = $table->{$j_name};
-	if ($j->{'Currently failed'} > 0) {
+	if ($j->{'Banned IP list'}) {
 		for my $ip (split(/\s+/, $j->{'Banned IP list'})) {
 			$current->{$ip}->{$j_name} = 1;
 			$curjails->{$j_name} = 1;
