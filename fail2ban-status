@@ -1,0 +1,113 @@
+#!/usr/bin/perl
+#
+# because the fail2ban CLI gives wonky output
+#
+
+use strict;
+use Data::Dumper;
+
+sub get_jails {
+	my @jails = ();
+	open(F, "-|", "fail2ban-client", "status") || die;
+	while (<F>) {
+		if (/Jail list:\s*(.*)$/) {
+			@jails = split(/,\s+/, $1);
+			last;
+		}
+	}
+	close(F);
+	return @jails;
+}
+
+sub get_status {
+	my ($jail) = @_;
+
+	my $status = {};
+	open(F, "-|", "fail2ban-client", "status", $jail) || die;
+	sub pick {
+		my ($status, $rx) = @_;
+		if ($_ =~ /$rx/) {
+			$status->{$1} = $2;
+			return 1;
+		}
+		return 0;
+	}
+	while (<F>) {
+		&pick($status, '(Currently failed):\s*(.*)$') ||
+		   &pick($status, '(Total failed):\s*(.*)$') ||
+		   &pick($status, '(File list):\s*(.*)$') ||
+		   &pick($status, '(Currently banned):\s*(.*)$') ||
+		   &pick($status, '(Total banned):\s*(.*)$') ||
+		   &pick($status, '(Banned IP list):\s*(.*)$');
+	}
+	close(F);
+	return $status;
+}
+
+my $table = {};
+for my $jail (&get_jails()) {
+	$table->{$jail} = &get_status($jail);
+}
+	
+my $current = {};
+my $curjails = {};
+my $curtot = 0;
+printf("%20s ---Failed--- ---Banned---\n", '');
+printf("%20s    Cur   Tot    Cur   Tot\n", '');
+for my $j_name (sort keys %$table) {
+	my $j = $table->{$j_name};
+	if ($j->{'Currently failed'} > 0) {
+		for my $ip (split(/\s+/, $j->{'Banned IP list'})) {
+			$current->{$ip}->{$j_name} = 1;
+			$curjails->{$j_name} = 1;
+			$curtot++;
+		}
+	}
+	printf("%20s %6d%6d %6d%6d\n",
+		$j_name,
+        $j->{'Currently failed'},
+        $j->{'Total failed'},
+        $j->{'Currently banned'},
+        $j->{'Total banned'});
+}
+
+sub nslookup() {
+	my $str = `host -W 1 $_[0] 2>&1`;
+	if ($str =~ /\.in-addr\.arpa domain name pointer (.*)$/) {
+		return $1;
+	}
+	return "";
+}
+
+print "\n";
+if ($curtot) {
+	use Geo::IP;
+
+	my $geo2 = Geo::IP->open("/usr/local/share/GeoIP/GeoIPCity.dat", GEOIP_STANDARD, GEOIP_MEMORY_CACHE);
+
+	printf "%-15s", '';
+	for my $jail (keys %$curjails) {
+		print(" $jail")
+	}
+	print("\n");
+	for my $ip (sort keys %$current) {
+		printf("%-15s", $ip);
+		for my $jail (keys %$curjails) {
+			printf(" %" . length($jail) . "s",
+                   defined($current->{$ip}->{$jail}) ? "X" : "");
+		}
+	 #	print(" " . &nslookup($ip) . "\n");
+		my $record = $geo2->record_by_addr($ip);
+		my $loc = $record->{'city'};
+		if ($loc) {
+			$loc .= ", ";
+		}
+		$loc .= $record->{'country_name'};
+		if (my $reverse = &nslookup($ip)) {
+			$loc .= " - $reverse";
+		}
+		print(" $loc\n");
+	}
+}
+
+
