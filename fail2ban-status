@@ -84,25 +84,35 @@ if ($curtot) {
 	use Geo::IP;
 
 	my $geo2 = Geo::IP->open("/usr/local/share/GeoIP/GeoIPCity.dat", GEOIP_STANDARD, GEOIP_MEMORY_CACHE);
+	my $geoloc = {};
+
+	for my $ip (keys(%{$current})) {
+		my $record = $geo2->record_by_addr($ip);
+		$geoloc->{$ip} = $record;
+	}
 
 	printf "%-15s", '';
 	for my $jail (keys %$curjails) {
 		print(" $jail")
 	}
 	print("\n");
-	for my $ip (sort keys %$current) {
+	for my $ip (sort {
+            $geoloc->{$a}->{'country_name'} cmp $geoloc->{$b}->{'country_name'} ||
+            $geoloc->{$a}->{'city'} cmp $geoloc->{$b}->{'city'} ||
+            $a cmp $b
+		} keys %$current)
+	{
 		printf("%-15s", $ip);
 		for my $jail (keys %$curjails) {
 			printf(" %" . length($jail) . "s",
                    defined($current->{$ip}->{$jail}) ? "X" : "");
 		}
-	 #	print(" " . &nslookup($ip) . "\n");
-		my $record = $geo2->record_by_addr($ip);
-		my $loc = $record->{'city'};
+		my $record = $geoloc->{$ip};
+		my $loc = $record->{'country_name'};
 		if ($loc) {
 			$loc .= ", ";
 		}
-		$loc .= $record->{'country_name'};
+		$loc .= $record->{'city'};
 		if (my $reverse = &nslookup($ip)) {
 			$loc .= " - $reverse";
 		}
